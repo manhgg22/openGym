@@ -1,0 +1,58 @@
+name: build-ios
+
+# Chạy tay từ tab Actions (nút "Run workflow")
+on:
+  workflow_dispatch:
+
+jobs:
+  build-ios:
+    runs-on: macos-15
+    defaults:
+      run:
+        shell: bash          # bash -e -o pipefail: lỗi không bị nuốt
+        working-directory: frontend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version   # Capacitor 7 cần Xcode 16+
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build mobile bundle (vite + cap sync + pod install)
+        run: npm run build:mobile
+
+      - name: Archive (unsigned)
+        working-directory: frontend/ios/App
+        run: |
+          xcodebuild \
+            -workspace App.xcworkspace \
+            -scheme App \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath "$PWD/build/App.xcarchive" \
+            CURRENT_PROJECT_VERSION=${{ github.run_number }} \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            archive
+
+      - name: Package unsigned .ipa
+        working-directory: frontend/ios/App
+        run: |
+          rm -rf Payload && mkdir Payload
+          cp -R build/App.xcarchive/Products/Applications/App.app Payload/
+          zip -qr "$GITHUB_WORKSPACE/openGym-unsigned.ipa" Payload
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: openGym-ios-unsigned
+          path: openGym-unsigned.ipa
